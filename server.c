@@ -12,18 +12,6 @@
 
 #define PORT 5001
 
-/* ab -n1000 -c10 http://localhost:5001/ */
-/* netstat -anl | grep "5001" */
-/* lsof -i:5001 */
-
-/* gcc main.c -I/usr/local/include -L/usr/local/lib -lzlog */
-
-/*
- * mozilla: https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers
- * rfc6455: https://tools.ietf.org/html/rfc6455
- * rfc6455 Chinese: https://www.gitbook.com/book/chenjianlong/rfc-6455-websocket-protocol-in-chinese/details
- */
-
 // 逻辑处理
 void handler(int sock);
 
