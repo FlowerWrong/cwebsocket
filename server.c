@@ -10,16 +10,21 @@
 // @see https://github.com/HardySimpson/zlog
 #include "zlog.h"
 
+// @see https://github.com/nodejs/http-parser
+#include "http_parser.h"
+
+#include "tools.h"
+
 #define PORT 5001
 
 // 逻辑处理
-void handler(int sock);
+void handler(int sock, http_parser *parser, http_parser_settings settings);
 
 // 信号处理
 void sigchld_handler(int signal);
 
 // 死循环
-void forever_run(int listenSocketFd, struct sockaddr_in cli_addr);
+void forever_run(int listenSocketFd, struct sockaddr_in cli_addr, http_parser *parser, http_parser_settings settings);
 
 // fork daemon process后续处理
 void daemon_after();
@@ -28,7 +33,15 @@ void daemon_after();
 void usage(void);
 
 // init zlog
-zlog_category_t * y_zlog_init();
+zlog_category_t *y_zlog_init();
+
+pid_t parent_pid;
+
+/*
+ * http-parser callbak
+ */
+int url_cb(http_parser *parser, const char *at, size_t length);
+int header_field_cb(http_parser *parser, const char *p, size_t len);
 
 int main(int argc, char *argv[]) {
     int listenSocketFd, portno;
@@ -76,9 +89,15 @@ int main(int argc, char *argv[]) {
 
     listen(listenSocketFd, 5);
 
-    printf("Main pid is: %d\n", getpid());
-
     signal(SIGCHLD, sigchld_handler); // 防止子进程变成僵尸进程
+
+    // http parse setting
+    http_parser_settings settings;
+    settings.on_url = url_cb;
+    settings.on_header_field = header_field_cb;
+
+    http_parser *parser = malloc(sizeof(http_parser));
+    http_parser_init(parser, HTTP_REQUEST);
 
     // daemon
     // @see http://www.netzmafia.de/skripten/unix/linux-daemon-howto.html
@@ -92,7 +111,11 @@ int main(int argc, char *argv[]) {
 
             daemon_after();
 
-            forever_run(listenSocketFd, cli_addr);
+            // parent pid
+            parent_pid = getpid();
+            printf("Parent pid is: %d\n", parent_pid);
+
+            forever_run(listenSocketFd, cli_addr, parser, settings);
             zlog_fini();
         } else if (pid > 0) {
             printf("server pid is: %d\n", pid);
@@ -105,33 +128,60 @@ int main(int argc, char *argv[]) {
             exit(EXIT_FAILURE);
         }
     } else {
-        forever_run(listenSocketFd, cli_addr);
+        // parent pid
+        parent_pid = getpid();
+        printf("Parent pid is: %d\n", parent_pid);
+
+        forever_run(listenSocketFd, cli_addr, parser, settings);
         zlog_fini();
     }
 }
 
-void handler(int sock) {
-    ssize_t n;
+void handler(int sock, http_parser *parser, http_parser_settings settings) {
+    ssize_t recved, nparsed;
     char buffer[1024];
     bzero(buffer, 1024);
-    n = read(sock, buffer, 1023); // TODO why 1023?
+    recved = read(sock, buffer, 1023); // TODO why 1023?
 
-    if (n < 0) {
+    if (recved < 0) {
         perror("ERROR reading from socket");
         exit(1);
     }
 
     printf("Here is the message: %s\n", buffer);
-    n = write(sock, "I got your message", 18);
 
-    if (n < 0) {
+    // get http content-length
+    /* Start up / continue the parser.
+     * Note we pass recved==0 to signal that EOF has been received.
+     */
+    nparsed = http_parser_execute(parser, &settings, buffer, (size_t) recved);
+
+    printf("nparsed is: %d\n", (int) nparsed);
+
+    printf("---");
+
+    if (parser->upgrade) {
+        /* handle new protocol */
+        printf("content_length is: %s\n", (char *) parser->content_length);
+    } else if (nparsed != recved) {
+        /* Handle error. Usually just close the connection. */
+        perror("Handle error. Usually just close the connection");
+        exit(1);
+    } else {
+        perror("unknown error");
+        exit(1);
+    }
+    recved = write(sock, "I got your message", 18);
+
+    if (recved < 0) {
         perror("ERROR writing to socket");
         exit(1);
     }
 }
 
+// @see https://chenjianlong.gitbooks.io/rfc-6455-websocket-protocol-in-chinese/content/section4/section4.html
 void handshake() {
-
+    char *magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 }
 
 /* 处理僵尸进程 */
@@ -139,7 +189,7 @@ void sigchld_handler(int signal) {
     while (waitpid(-1, NULL, WNOHANG) > 0);
 }
 
-void forever_run(int listenSocketFd, struct sockaddr_in cli_addr) {
+void forever_run(int listenSocketFd, struct sockaddr_in cli_addr, http_parser *parser, http_parser_settings settings) {
     int clientSocketFd, clilen;
     pid_t pid;
     clilen = sizeof(cli_addr);
@@ -160,13 +210,14 @@ void forever_run(int listenSocketFd, struct sockaddr_in cli_addr) {
         }
 
         if (pid == 0) {
-            /* This is the client process */
-            printf("Child pid is: %d\n", getpid());
+            parser->data = (void *) clientSocketFd;
 
             close(listenSocketFd); // 引用计数-1
-            printf("ListenSocketFileDescriber is: %d\n", listenSocketFd);
 
-            handler(clientSocketFd);
+            printf("Child processes are: ");
+            get_all_child_process(parent_pid);
+
+            handler(clientSocketFd, parser, settings);
             exit(0);
         } else {
             close(clientSocketFd);
@@ -198,7 +249,8 @@ void daemon_after() {
     close(STDERR_FILENO);
 }
 
-zlog_category_t * y_zlog_init() {
+// zlog init
+zlog_category_t *y_zlog_init() {
     zlog_category_t *c;
     int rc;
     rc = zlog_init("/etc/zlog.conf");
@@ -219,6 +271,26 @@ zlog_category_t * y_zlog_init() {
 
 void usage(void) {
     printf("Usage:\n");
-    printf ("-D run server in daemonize.\n");
-    exit (8);
+    printf("-D run server in daemonize.\n");
+    exit(8);
+}
+
+
+/*
+ * http-parser callback
+ */
+
+int url_cb(http_parser *parser, const char *at, size_t length) {
+    printf("url callback called");
+    /* access to thread local custom_data_t struct.
+    Use this access save parsed data for later use into thread local
+    buffer, or communicate over socket
+    */
+    parser->data;
+    return 0;
+}
+
+int header_field_cb(http_parser *parser, const char *p, size_t len) {
+    printf("header field callback called");
+    return 0;
 }

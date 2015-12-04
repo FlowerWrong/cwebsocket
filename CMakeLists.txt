@@ -7,5 +7,5 @@ set(CMAKE_C_FLAGS "-I/usr/local/include")
 set(CMAKE_C_FLAGS "-L/usr/local/lib")
 set(CMAKE_C_FLAGS "-lzlog")
 
-set(SOURCE_FILES server.c)
+set(SOURCE_FILES server.c tools.c)
 add_executable(cwebsocket ${SOURCE_FILES})

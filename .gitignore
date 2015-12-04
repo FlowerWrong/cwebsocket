@@ -2,3 +2,9 @@
 
 /a.out
 /server
+/sha
+
+/http-parser/
+/tinyhttp
+/h3
+/picohttpparser
