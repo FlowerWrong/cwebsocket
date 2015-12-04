@@ -18,13 +18,13 @@
 #define PORT 5001
 
 // 逻辑处理
-void handler(int sock, http_parser *parser, http_parser_settings settings);
+void handler(int sock);
 
 // 信号处理
 void sigchld_handler(int signal);
 
 // 死循环
-void forever_run(int listenSocketFd, struct sockaddr_in cli_addr, http_parser *parser, http_parser_settings settings);
+void forever_run(int listenSocketFd, struct sockaddr_in cli_addr);
 
 // fork daemon process后续处理
 void daemon_after();
@@ -42,6 +42,11 @@ pid_t parent_pid;
  */
 int url_cb(http_parser *parser, const char *at, size_t length);
 int header_field_cb(http_parser *parser, const char *p, size_t len);
+
+
+// http parse setting
+http_parser_settings settings;
+static http_parser *parser;
 
 int main(int argc, char *argv[]) {
     int listenSocketFd, portno;
@@ -89,15 +94,14 @@ int main(int argc, char *argv[]) {
 
     listen(listenSocketFd, 5);
 
-    signal(SIGCHLD, sigchld_handler); // 防止子进程变成僵尸进程
 
-    // http parse setting
-    http_parser_settings settings;
+    // http-parser setting
     settings.on_url = url_cb;
     settings.on_header_field = header_field_cb;
-
-    http_parser *parser = malloc(sizeof(http_parser));
+    parser = malloc(sizeof(http_parser));
     http_parser_init(parser, HTTP_REQUEST);
+
+    signal(SIGCHLD, sigchld_handler); // 防止子进程变成僵尸进程
 
     // daemon
     // @see http://www.netzmafia.de/skripten/unix/linux-daemon-howto.html
@@ -115,7 +119,7 @@ int main(int argc, char *argv[]) {
             parent_pid = getpid();
             printf("Parent pid is: %d\n", parent_pid);
 
-            forever_run(listenSocketFd, cli_addr, parser, settings);
+            forever_run(listenSocketFd, cli_addr);
             zlog_fini();
         } else if (pid > 0) {
             printf("server pid is: %d\n", pid);
@@ -132,12 +136,12 @@ int main(int argc, char *argv[]) {
         parent_pid = getpid();
         printf("Parent pid is: %d\n", parent_pid);
 
-        forever_run(listenSocketFd, cli_addr, parser, settings);
+        forever_run(listenSocketFd, cli_addr);
         zlog_fini();
     }
 }
 
-void handler(int sock, http_parser *parser, http_parser_settings settings) {
+void handler(int sock) {
     ssize_t recved, nparsed;
     char buffer[1024];
     bzero(buffer, 1024);
@@ -154,23 +158,24 @@ void handler(int sock, http_parser *parser, http_parser_settings settings) {
     /* Start up / continue the parser.
      * Note we pass recved==0 to signal that EOF has been received.
      */
-    nparsed = http_parser_execute(parser, &settings, buffer, (size_t) recved);
+    nparsed = http_parser_execute(parser, &settings, buffer, strlen(buffer));
 
     printf("nparsed is: %d\n", (int) nparsed);
-
-    printf("---");
+    printf("recved is: %d\n", (int) recved);
 
     if (parser->upgrade) {
         /* handle new protocol */
-        printf("content_length is: %s\n", (char *) parser->content_length);
+        // handle websocket
+        printf("handle websocket here\n");
     } else if (nparsed != recved) {
         /* Handle error. Usually just close the connection. */
         perror("Handle error. Usually just close the connection");
         exit(1);
-    } else {
-        perror("unknown error");
-        exit(1);
     }
+
+    printf("status_code is: %d\n", parser->status_code);
+    printf("http method is: %d\n", parser->method); // 1=GET
+
     recved = write(sock, "I got your message", 18);
 
     if (recved < 0) {
@@ -189,7 +194,7 @@ void sigchld_handler(int signal) {
     while (waitpid(-1, NULL, WNOHANG) > 0);
 }
 
-void forever_run(int listenSocketFd, struct sockaddr_in cli_addr, http_parser *parser, http_parser_settings settings) {
+void forever_run(int listenSocketFd, struct sockaddr_in cli_addr) {
     int clientSocketFd, clilen;
     pid_t pid;
     clilen = sizeof(cli_addr);
@@ -217,7 +222,7 @@ void forever_run(int listenSocketFd, struct sockaddr_in cli_addr, http_parser *p
             printf("Child processes are: ");
             get_all_child_process(parent_pid);
 
-            handler(clientSocketFd, parser, settings);
+            handler(clientSocketFd);
             exit(0);
         } else {
             close(clientSocketFd);
@@ -280,17 +285,20 @@ void usage(void) {
  * http-parser callback
  */
 
-int url_cb(http_parser *parser, const char *at, size_t length) {
-    printf("url callback called");
+int url_cb(http_parser *parser, const char *at, size_t len) {
+    printf("url callback called\n");
+    printf("at is: %s\n", at);
+    printf("len is: %d\n", (int) len);
     /* access to thread local custom_data_t struct.
     Use this access save parsed data for later use into thread local
     buffer, or communicate over socket
     */
-    parser->data;
     return 0;
 }
 
 int header_field_cb(http_parser *parser, const char *p, size_t len) {
-    printf("header field callback called");
+    printf("header field callback called\n");
+    printf("p is: %s\n", p);
+    printf("len is: %d\n", (int) len);
     return 0;
 }
