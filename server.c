@@ -188,7 +188,7 @@ void handler(int sock) {
 
 // @see https://chenjianlong.gitbooks.io/rfc-6455-websocket-protocol-in-chinese/content/section4/section4.html
 void handshake() {
-    char *magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    const char *GID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 }
 
 /* 处理僵尸进程 */
