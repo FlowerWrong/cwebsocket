@@ -8,3 +8,7 @@
 /tinyhttp
 /h3
 /picohttpparser
+/ffi-http-parser
+/python-http-parser
+/libwebsock
+/ngrok

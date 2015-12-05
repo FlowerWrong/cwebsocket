@@ -154,7 +154,6 @@ void handler(int sock) {
 
     printf("Here is the message: %s\n", buffer);
 
-    // get http content-length
     /* Start up / continue the parser.
      * Note we pass recved==0 to signal that EOF has been received.
      */
@@ -163,7 +162,7 @@ void handler(int sock) {
     printf("nparsed is: %d\n", (int) nparsed);
     printf("recved is: %d\n", (int) recved);
 
-    if (parser->upgrade) {
+    if (parser->upgrade) { // websocket
         /* handle new protocol */
         // handle websocket
         printf("handle websocket here\n");
@@ -171,16 +170,19 @@ void handler(int sock) {
         /* Handle error. Usually just close the connection. */
         perror("Handle error. Usually just close the connection");
         exit(1);
-    }
+    } else { // http
+        printf("status_code is: %d\n", parser->status_code);
+        printf("http method is: %d\n", parser->method); // 1=GET
 
-    printf("status_code is: %d\n", parser->status_code);
-    printf("http method is: %d\n", parser->method); // 1=GET
+        char *reply;
+        reply = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nI got your message";
 
-    recved = write(sock, "I got your message", 18);
+        recved = write(sock, reply, strlen(reply));
 
-    if (recved < 0) {
-        perror("ERROR writing to socket");
-        exit(1);
+        if (recved < 0) {
+            perror("ERROR writing to socket");
+            exit(1);
+        }
     }
 }
 
